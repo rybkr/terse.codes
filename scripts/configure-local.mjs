@@ -3,9 +3,17 @@ import { appendFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 if (process.env.NODE_ENV === 'production') throw new Error('Use the deployment secret manager for production configuration.');
+
+const setupArgs = ['--', 'node_modules/convex/bin/main.js', 'dev', '--env-file', '.env.local', '--once'];
+if (!process.env.CONVEX_DEPLOYMENT && !process.env.CONVEX_DEPLOY_KEY && !process.env.CONVEX_SELF_HOSTED_URL) {
+  setupArgs.push('--configure');
+}
+const setup = spawnSync(process.execPath, setupArgs, { stdio: 'inherit' });
+if (setup.status !== 0) throw new Error('Could not configure the Convex development deployment.');
+
 const generated = !process.env.TERSE_SERVER_SECRET;
 const secret = process.env.TERSE_SERVER_SECRET ?? randomBytes(32).toString('hex');
-const result = spawnSync('pnpm', ['exec', 'convex', 'env', 'set', 'TERSE_SERVER_SECRET'], {
+const result = spawnSync(process.execPath, ['--', 'node_modules/convex/bin/main.js', 'env', '--env-file', '.env.local', 'set', 'TERSE_SERVER_SECRET'], {
   input: `${secret}\n`, encoding: 'utf8',
 });
 if (result.status !== 0) throw new Error('Could not configure the Convex development service secret. Check the configured development deployment.');

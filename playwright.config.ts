@@ -30,7 +30,7 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   webServer: stress ? {
-    command: "pnpm exec tsx --env-file-if-exists=.env --env-file-if-exists=.env.local e2e/stress-server.ts",
+    command: "pnpm exec tsx --env-file-if-exists=.env.local e2e/stress-server.ts",
     url: `${baseURL}/health`,
     env: { APP_ORIGIN: baseURL, E2E_BASE_URL: baseURL },
     timeout: 30_000,

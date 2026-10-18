@@ -14,5 +14,5 @@
     "esModuleInterop": true,
     "types": ["node"]
   },
-  "include": ["server/**/*.ts", "tests/**/*.ts"]
+  "include": ["server/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
 }
