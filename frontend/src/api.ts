@@ -8,17 +8,18 @@ import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../server/router";
 
 export type RouterInputs = inferRouterInputs<AppRouter>;
-export type RoomSnapshot = inferRouterOutputs<AppRouter>["room"];
-export type Submission = inferRouterOutputs<AppRouter>["submit"];
+export type RouterOutputs = inferRouterOutputs<AppRouter>;
+export type RoomSnapshot = RouterOutputs["room"];
+export type Submission = RouterOutputs["submit"];
+export type Profile = RouterOutputs["profile"];
+export type UserState = RouterOutputs["me"];
 
-export function sessionToken(roomId: string) {
-  return sessionStorage.getItem(`leetrace:${roomId}`);
-}
+type TokenProvider = () => Promise<string | null>;
 
-export function saveSession(
-  session: inferRouterOutputs<AppRouter>["createRoom"],
-) {
-  sessionStorage.setItem(`leetrace:${session.roomId}`, session.token);
+let tokenProvider: TokenProvider | null = null;
+
+export function setTokenProvider(provider: TokenProvider | null) {
+  tokenProvider = provider;
 }
 
 export const api = createTRPCClient<AppRouter>({
@@ -28,9 +29,8 @@ export const api = createTRPCClient<AppRouter>({
       true: httpSubscriptionLink({ url: "/trpc" }),
       false: httpBatchLink({
         url: "/trpc",
-        headers() {
-          const roomId = new URLSearchParams(window.location.search).get("id");
-          const token = roomId ? sessionToken(roomId) : null;
+        async headers() {
+          const token = await tokenProvider?.();
           return token ? { authorization: `Bearer ${token}` } : {};
         },
       }),

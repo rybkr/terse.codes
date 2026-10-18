@@ -152,6 +152,28 @@ def solve():
     expect(compile.error).toMatch(/compilation/i);
   });
 
+  it('rejects forged response bursts without buffering the entire remaining input suite', async () => {
+    const value = 'x'.repeat(2 * 1024 * 1024);
+    const result = await runCode(`import os
+def solve(value):
+    os.write(1, b'{"output":"null"}\\n' * 1000)
+    return None
+`, problem(Array.from({ length: 40 }, () => ({ input: [value], expected: null }))));
+    expect(result.solved).toBe(false);
+    expect(result.error).toBe('Invalid runner output.');
+    expect(result.passed).toBeLessThanOrEqual(2);
+  });
+
+  it('bounds forged worker errors before retaining submission feedback', async () => {
+    const result = await runCode(`import json, os
+os.write(1, (json.dumps({"error": "x" * 500000}) + "\\n").encode())
+os._exit(0)
+`, problem([{ input: [], expected: 1 }]));
+    expect(result.solved).toBe(false);
+    expect(result.error).toBe('x'.repeat(500));
+    expect(result.firstFailure?.actual).toHaveLength(500);
+  });
+
   it('scales output budgets to legitimate large testcase results', async () => {
     const expected = 'x'.repeat(2 * 1024 * 1024);
     const result = await runCode('def solve():\n    return "x" * (2 * 1024 * 1024)',

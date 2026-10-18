@@ -1,7 +1,9 @@
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAppServer } from '../server/http.js';
-import { ProblemRepository, type Problem } from '../server/problems.js';
+import type { Accounts, Identity, PublicProfile } from '../server/accounts.js';
+import { unauthorized } from '../server/accounts.js';
+import type { Problem } from '../server/problems.js';
 import { createRouter, type AppRouter, type RoomSnapshot } from '../server/router.js';
 import { RoomStore } from '../server/rooms.js';
 
@@ -13,9 +15,24 @@ const problem: Problem = {
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const stop of cleanup.splice(0)) stop(); });
 
+function profile(userId: string): PublicProfile {
+  return {
+    userId, username: userId, rating: 1000, tournamentWins: 0, roundWins: 0, careerPoints: 0, solvedProblems: 0,
+    roundWinStreak: 0, bestRoundWinStreak: 0, tournamentWinStreak: 0, bestTournamentWinStreak: 0,
+  };
+}
+
 async function serverSetup() {
-  const store = new RoomStore(() => problem);
-  const router = createRouter(store, new ProblemRepository());
+  const accounts: Accounts = {
+    async verify(token) {
+      if (!token || !['Dark', 'Chat', 'Other'].includes(token)) unauthorized();
+      return { userId: token, sessionId: token, expiresAt: Date.now() + 60_000 };
+    },
+    async signIn(identity: Identity) { return profile(identity.userId); },
+    async profile(identity: Identity) { return profile(identity.userId); },
+  };
+  const store = new RoomStore(() => problem, async () => ({ passed: 1, total: 1, solved: true, charCount: 20, error: null, timeMs: 1, firstFailure: null, stdout: '', stderr: '' }));
+  const router = createRouter(store, accounts);
   const server = createAppServer(router);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   cleanup.push(() => { server.closeAllConnections(); server.close(); });
@@ -28,40 +45,61 @@ async function serverSetup() {
   return { store, client, url };
 }
 
-describe('tRPC transport', () => {
-  it('limits trimmed player names to twelve characters when creating or joining a room', async () => {
-    const { client } = await serverSetup();
-    const host = await client().createRoom.mutate({ name: '  abcdefghijkl  ' });
-    expect(host.name).toBe('abcdefghijkl');
-    await expect(client().createRoom.mutate({ name: 'abcdefghijklm' })).rejects.toThrow('at most 12 characters');
-    await expect(client().joinRoom.mutate({ roomId: host.roomId, name: 'abcdefghijklm' })).rejects.toThrow('at most 12 characters');
-    const guest = await client().joinRoom.mutate({ roomId: host.roomId, name: '  mnopqrstuvwx  ' });
-    expect(guest.name).toBe('mnopqrstuvwx');
+describe('authenticated tRPC transport', () => {
+  it('requires an account and derives room identity from the verified profile', async () => {
+    const { client, url } = await serverSetup();
+    await expect(client().createRoom.mutate({})).rejects.toThrow('Sign in');
+    await expect(client('forged').signIn.mutate()).rejects.toThrow('Sign in');
+    const host = await client('Dark').createRoom.mutate({});
+    expect(host.name).toBe('Dark');
+    expect(host.roomId).toMatch(/^[A-Za-z0-9_-]{24}$/);
+    const spoof = await fetch(`${url}/createRoom`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer Chat' },
+      body: JSON.stringify({ name: 'Dark' }),
+    });
+    expect(spoof.status).toBe(400);
+    await expect(client('Other').room.query({ roomId: host.roomId })).rejects.toThrow('Rejoin');
   });
 
-  it('validates inputs and authenticates room access over HTTP', async () => {
+  it('enforces roles and deadlines over HTTP while preserving private submissions', async () => {
     const { client } = await serverSetup();
-    await expect(client().createRoom.mutate({ name: 'Dark', timeLimit: 1 })).rejects.toThrow();
-    const host = await client().createRoom.mutate({ name: 'Dark' });
-    await expect(client().room.query({ roomId: host.roomId })).rejects.toThrow('Rejoin');
-    const snapshot = await client(host.token).room.query({ roomId: host.roomId });
-    expect(snapshot.host).toBe('Dark');
-    expect(snapshot.problem).toBeNull();
-    await client(host.token).start.mutate({ roomId: host.roomId });
-    const playing = await client(host.token).room.query({ roomId: host.roomId });
-    expect(playing.problem?.starterCode).toContain('class Solution:');
-    const result = await client(host.token).submit.mutate({
-      roomId: host.roomId, code: 'class Solution:\n    def echo(self, value):\n        return value',
+    const host = await client('Dark').createRoom.mutate({});
+    await client('Chat').joinRoom.mutate({ roomId: host.roomId });
+    await expect(client('Chat').start.mutate({ roomId: host.roomId })).rejects.toThrow('Only the host');
+    await client('Dark').start.mutate({ roomId: host.roomId });
+    await client('Dark').submit.mutate({ roomId: host.roomId, code: 'correct solution' });
+    const playing = await client('Chat').room.query({ roomId: host.roomId });
+    expect(playing.rankings[0]?.code).toBeNull();
+    expect(playing.me.submission).toBeNull();
+    expect(playing.problem).not.toHaveProperty('tests');
+    await client('Dark').kick.mutate({ roomId: host.roomId, userId: 'Chat' });
+    await expect(client('Chat').joinRoom.mutate({ roomId: host.roomId })).rejects.toThrow('removed');
+    expect((await client('Dark').me.query()).roomId).toBe(host.roomId);
+  });
+
+  it('sets private response headers and rejects untrusted origins', async () => {
+    const { url } = await serverSetup();
+    const health = await fetch(url.replace('/trpc', '/health'));
+    expect(health.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(health.headers.get('cache-control')).toBe('no-store');
+    const response = await fetch(`${url}/me`, { headers: { origin: 'https://evil.example', authorization: 'Bearer Dark' } });
+    expect(response.status).toBe(403);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    const rejectedClient = createTRPCClient<AppRouter>({ links: [httpBatchLink({
+      url, headers: { origin: 'https://evil.example', authorization: 'Bearer Dark' },
+    })] });
+    await expect(rejectedClient.me.query()).rejects.toMatchObject({
+      message: 'Origin is not allowed. Open Terse using its configured address.',
+      data: { code: 'FORBIDDEN', httpStatus: 403 },
     });
-    expect(result).toMatchObject({ passed: 1, solved: true, error: null });
   });
 
   it('sends an immediate personalized SSE snapshot then live changes', async () => {
     const { client, url } = await serverSetup();
-    const host = await client().createRoom.mutate({ name: 'Dark' });
+    const host = await client('Dark').createRoom.mutate({});
     const abort = new AbortController();
     cleanup.push(() => abort.abort());
-    const input = encodeURIComponent(JSON.stringify({ roomId: host.roomId, token: host.token }));
+    const input = encodeURIComponent(JSON.stringify({ roomId: host.roomId, token: 'Dark' }));
     const response = await fetch(`${url}/roomUpdates?input=${input}`, { signal: abort.signal });
     expect(response.headers.get('content-type')).toContain('text/event-stream');
     const reader = response.body?.getReader();
@@ -85,11 +123,10 @@ describe('tRPC transport', () => {
         buffer += decoder.decode(chunk.value, { stream: true });
       }
     };
-    expect((await nextSnapshot()).me.name).toBe('Dark');
-    await client(host.token).start.mutate({ roomId: host.roomId });
-    const playing = await nextSnapshot();
-    expect(playing.state).toBe('playing');
-    expect(playing.problem).not.toHaveProperty('tests');
+    expect((await nextSnapshot()).me.userId).toBe('Dark');
+    await client('Dark').heartbeat.mutate({ roomId: host.roomId });
+    await client('Dark').start.mutate({ roomId: host.roomId });
+    expect((await nextSnapshot()).state).toBe('playing');
     abort.abort();
   });
 });

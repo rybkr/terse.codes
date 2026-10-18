@@ -1,5 +1,6 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useLocation } from "react-router-dom";
+import { useClerk } from "@clerk/react";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
 import { useRoom, formatTimer, type RoomState } from "../hooks/useRoom";
@@ -8,7 +9,7 @@ import CodeEditor, { type EditorInstance } from "./CodeEditor";
 import { ChatDock } from "./Chat";
 import { ResultsPane } from "./Results";
 import { ProblemDescription } from "./ProblemDescription";
-import { Finished, Lobby } from "./RoomViews";
+import { Finished, Lobby, TournamentResults } from "./RoomViews";
 import { StandingsStrip } from "./Standings";
 import { editorFont, graphiteTheme } from "./editorTheme";
 import {
@@ -55,6 +56,7 @@ function Timer({ remaining, total }: { remaining: number; total: number }) {
 }
 
 function Header({ r }: { r: RoomState }) {
+  const { signOut } = useClerk();
   const room = r.room!;
   const playing = room.state === "playing";
   const progress = playing && room.timeLimit ? Math.max(0, room.remaining / room.timeLimit) : 0;
@@ -89,7 +91,9 @@ function Header({ r }: { r: RoomState }) {
             Round {room.currentRound}/{room.totalRounds}
           </span>
         )}
-        {playing && !r.review ? (
+        {playing && !r.review && r.judging ? (
+          <span role="status" className="whitespace-nowrap text-[12.5px] text-warn">Judging submissions…</span>
+        ) : playing && !r.review ? (
           <Timer remaining={room.remaining} total={room.timeLimit} />
         ) : room.state === "finished" && room.breakRemaining !== null ? (
           <span className="flex items-center gap-2 text-[12.5px] text-fg-subtle">
@@ -103,10 +107,13 @@ function Header({ r }: { r: RoomState }) {
         )}
       </div>
 
-      <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3">
-        <span aria-label={room.me.name} title={room.me.name}>
+      <div className="flex min-w-0 items-center justify-end gap-1 sm:gap-2">
+        <Link to="/profile" aria-label="Open player profile" title="Player profile" className="rounded-full">
           <Avatar name={room.me.name} size={22} />
-        </span>
+        </Link>
+        <button type="button" onClick={() => void signOut({ redirectUrl: "/sign-in" })} className="btn btn-ghost btn-sm px-1.5 sm:px-2" aria-label="Sign out">
+          <Icon.leave size={14} /> <span className="hidden sm:inline">Sign out</span>
+        </button>
       </div>
 
       {playing && !r.review && (
@@ -169,7 +176,7 @@ function EditorToolbar({ r }: { r: RoomState }) {
         <span className="pill pill-accent ml-1 min-w-0 shrink">
           <Icon.eye size={11} className="flex-none" />
           <span className="truncate">
-            {r.review.name === r.room?.me.name ? "Your code" : `${r.review.name}’s code`}
+            {r.review.userId === r.room?.me.userId ? "Your code" : `${r.review.name}’s code`}
           </span>
         </span>
       )}
@@ -288,6 +295,7 @@ function Workspace({
           className={cx("panel flex min-h-0 flex-col overflow-hidden", wide ? "flex-1" : "h-[460px] flex-none")}
         >
           <EditorToolbar r={r} />
+          {r.judging && <div role="status" className="border-b border-warn/20 bg-warn/[0.06] px-3 py-1.5 text-[12px] text-warn">Time is up. Judging queued submissions…</div>}
           <FinishedBanner r={r} />
           <div className="relative min-h-0 flex-1">
             <div className="absolute inset-0">
@@ -329,7 +337,7 @@ function Workspace({
               r.review
                 ? {
                     name: r.review.name,
-                    row: room.rankings.find((player) => player.name === r.review?.name),
+                    row: room.rankings.find((player) => player.userId === r.review?.userId),
                   }
                 : null
             }
@@ -396,16 +404,22 @@ function Connecting({ roomId, error }: { roomId: string; error: string }) {
 
 export default function Room() {
   const r = useRoom();
+  const location = useLocation();
   const editorRef = useRef<EditorInstance | null>(null);
   const layout = usePaneLayout({
     messageCount: r.room?.messages.length ?? 0,
     onChatClosed: () => editorRef.current?.focus(),
   });
 
-  if (!r.roomId || !r.token) return <Navigate to="/" replace />;
-  if (!r.room) return <Connecting roomId={r.roomId} error={r.error} />;
+  if (!r.roomId) return <Navigate to="/" replace />;
+  if (!r.token || !r.room) return <Connecting roomId={r.roomId} error={r.error} />;
 
   const room = r.room;
+  if (location.pathname === "/room/results") {
+    return room.state === "finished"
+      ? <TournamentResults r={r} />
+      : <Navigate to={`/room?id=${encodeURIComponent(r.roomId)}`} replace />;
+  }
   const workspace = room.problem !== null && (room.state === "playing" || r.review !== null);
 
   return (
@@ -413,7 +427,7 @@ export default function Room() {
       <div className="flex h-full flex-col overflow-hidden">
         <Header r={r} />
         {room.state === "playing" && !r.review && (
-          <StandingsStrip room={room} />
+          <StandingsStrip room={room} isHost={r.isHost} onKick={r.kick} />
         )}
         <div
           ref={layout.containerRef}

@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "module": "ESNext", "moduleResolution": "Bundler", "types": ["node"] },
+  "include": ["e2e/**/*.ts", "playwright.config.ts"]
+}

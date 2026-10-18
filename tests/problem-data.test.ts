@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { problemSchema, type Problem } from '../server/problems.js';
+import { ProblemRepository, problemSchema, type Problem } from '../server/problems.js';
 import { runCode } from '../server/runner.js';
 import { decodeJsonValue, jsonValueBytes } from '../server/problem-values.js';
 
@@ -23,11 +23,17 @@ describe('repaired problem data', () => {
     const files = readdirSync(directory).sort();
     expect(files).toHaveLength(1884);
     let testCount = 0;
+    const repository = new ProblemRepository(directory);
     const signatures: Pick<Problem, 'id' | 'starterCode' | 'entryPoint' | 'parameters' | 'returnType'>[] = [];
     for (const file of files) {
       expect(file).toMatch(/^[a-z0-9-]+\.json$/);
-      const data: unknown = JSON.parse(readFileSync(resolve(directory, file), 'utf8'));
+      const contents = readFileSync(resolve(directory, file), 'utf8');
+      const data: unknown = JSON.parse(contents);
+      expect(contents.includes(',"tests":['), file).toBe(true);
       const problem = corpusSchema.parse(data);
+      const metadata = repository.get(file.slice(0, -5));
+      expect(metadata.testCount, file).toBe(problem.tests.length);
+      expect(metadata.comparison, file).toEqual(problem.comparison);
       for (const test of problem.tests) {
         if (test.input.length !== problem.parameters.length || !('expected' in test)) {
           throw new Error(`Invalid testcase in ${file}`);

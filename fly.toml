@@ -5,6 +5,8 @@
 
 app = 'leetrace'
 primary_region = 'iad'
+kill_signal = 'SIGTERM'
+kill_timeout = '30s'
 
 [build]
 
@@ -18,3 +20,10 @@ primary_region = 'iad'
 [[vm]]
   memory = '1gb'
   cpus = 1
+
+[[http_service.checks]]
+  grace_period = "15s"
+  interval = "15s"
+  method = "GET"
+  timeout = "3s"
+  path = "/health"

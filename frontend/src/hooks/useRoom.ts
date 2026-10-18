@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useAuth } from "@clerk/react";
 import {
   api,
   errorMessage,
-  sessionToken,
   type RoomSnapshot,
   type Submission,
 } from "../api";
@@ -36,22 +36,39 @@ function copySelection(text: string) {
 export function useRoom() {
   const [params] = useSearchParams();
   const roomId = params.get("id") ?? "";
-  const token = sessionToken(roomId);
+  const { getToken, isSignedIn } = useAuth();
   const navigate = useNavigate();
+  const [token, setToken] = useState<string | null>(null);
   const [room, setRoom] = useState<RoomSnapshot | null>(null);
+  const [serverOffset, setServerOffset] = useState(0);
+  const [clockNow, setClockNow] = useState(() => Date.now());
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const [code, setCode] = useState("");
   const [result, setResult] = useState<Submission | null>(null);
-  const [review, setReview] = useState<{ name: string; code: string } | null>(
+  const [review, setReview] = useState<{ userId: string; name: string; code: string } | null>(
     null,
   );
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => () => clearTimeout(copyTimer.current), []);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      const nextToken = isSignedIn ? await getToken({ skipCache: true }) : null;
+      if (active) setToken(nextToken);
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [getToken, isSignedIn]);
 
   useEffect(() => {
     for (const key of Object.keys(sessionStorage)) {
@@ -61,28 +78,62 @@ export function useRoom() {
 
   useEffect(() => {
     if (!roomId || !token) return;
+    let active = true;
+    let heartbeatTimer: number | undefined;
+    const heartbeat = () => {
+      if (!navigator.onLine) return;
+      void api.heartbeat.mutate({ roomId }).catch((failure: unknown) => {
+        if (active) setError(errorMessage(failure));
+      });
+    };
+    const startHeartbeats = () => {
+      if (heartbeatTimer !== undefined) return;
+      heartbeat();
+      heartbeatTimer = window.setInterval(heartbeat, 5_000);
+      window.addEventListener("online", heartbeat);
+    };
+    const stopHeartbeats = () => {
+      if (heartbeatTimer === undefined) return;
+      window.clearInterval(heartbeatTimer);
+      heartbeatTimer = undefined;
+      window.removeEventListener("online", heartbeat);
+    };
     const subscription = api.roomUpdates.subscribe(
       { roomId, token },
       {
         onStarted() {
           setConnected(true);
           setError("");
+          startHeartbeats();
         },
         onConnectionStateChange(state) {
           setConnected(state.state === "pending");
         },
         onData(snapshot) {
           setRoom(snapshot);
+          setServerOffset(snapshot.serverNow - Date.now());
+          setClockNow(Date.now());
           setConnected(true);
+          startHeartbeats();
         },
         onError(error) {
           setConnected(false);
           setError(errorMessage(error));
+          stopHeartbeats();
         },
       },
     );
-    return () => subscription.unsubscribe();
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+      stopHeartbeats();
+    };
   }, [roomId, token]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setClockNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const starterCode = room?.problem?.starterCode;
   const roundId = room?.roundId;
@@ -109,9 +160,16 @@ export function useRoom() {
     }
   }, []);
 
+  const serverNow = clockNow + serverOffset;
+  const clockRoom = room ? {
+    ...room,
+    remaining: room.endsAt === null ? room.remaining : Math.max(0, Math.ceil((room.endsAt - serverNow) / 1_000)),
+    breakRemaining: room.breakUntil === null ? room.breakRemaining : Math.max(0, Math.ceil((room.breakUntil - serverNow) / 1_000)),
+  } : null;
+  const judging = clockRoom?.state === "playing" && clockRoom.remaining === 0;
   const finished = room ? room.me.locked || room.me.resigned : false;
   const readOnly =
-    !room || room.state !== "playing" || finished || review !== null;
+    !room || room.state !== "playing" || finished || judging || review !== null;
   const canAct = connected && !pending;
 
   function submit() {
@@ -123,13 +181,12 @@ export function useRoom() {
 
   async function leave() {
     if (await perform(() => api.leave.mutate({ roomId }))) {
-      sessionStorage.removeItem(`leetrace:${roomId}`);
       navigate("/");
     }
   }
 
   async function copyRoom(kind: "code" | "link" = "code") {
-    const text = kind === "link" ? `https://terse.codes/join/${roomId}` : roomId;
+    const text = kind === "link" ? `${window.location.origin}/join/${encodeURIComponent(roomId)}` : roomId;
     try {
       if (navigator.clipboard) {
         try {
@@ -149,7 +206,7 @@ export function useRoom() {
     }
   }
 
-  const me = room?.rankings.find((player) => player.name === room.me.name);
+  const me = room?.rankings.find((player) => player.userId === room.me.userId);
   const waitingOn =
     room?.state === "playing"
       ? room.rankings
@@ -163,7 +220,7 @@ export function useRoom() {
   return {
     roomId,
     token,
-    room,
+    room: clockRoom,
     connected,
     error,
     setError,
@@ -177,8 +234,9 @@ export function useRoom() {
     copied,
     copyRoom,
     me,
-    isHost: room ? room.host === room.me.name : false,
+    isHost: room ? room.hostId === room.me.userId : false,
     finished,
+    judging,
     readOnly,
     waitingOn,
     submit,
@@ -186,6 +244,7 @@ export function useRoom() {
     start: () => perform(() => api.start.mutate({ roomId })),
     lock: () => perform(() => api.lock.mutate({ roomId })),
     resign: () => perform(() => api.resign.mutate({ roomId })),
+    kick: (userId: string) => perform(() => api.kick.mutate({ roomId, userId })),
     advance: () =>
       perform(() =>
         room?.breakRemaining !== null

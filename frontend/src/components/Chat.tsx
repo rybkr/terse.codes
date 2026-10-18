@@ -74,7 +74,7 @@ function ChatPanel({
         ) : (
           <ol className="flex flex-col">
             {room.messages.map((message, index) => {
-              const mine = message.sender === room.me.name;
+              const mine = message.senderId === room.me.userId;
               const grouped = room.messages[index - 1]?.sender === message.sender;
               return (
                 <li

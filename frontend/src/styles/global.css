@@ -163,6 +163,13 @@
   .btn-icon { width: 2rem; padding: 0; }
   .btn-sm.btn-icon { width: 1.75rem; }
 
+  .kick-reveal { opacity: 1; }
+  @media (hover: hover) {
+    .kick-reveal { opacity: 0; }
+    .group:hover .kick-reveal,
+    .group:focus-within .kick-reveal { opacity: 1; }
+  }
+
   .btn-primary {
     background: var(--color-accent-strong);
     border-color: #7d7df8;

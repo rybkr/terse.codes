@@ -190,6 +190,12 @@ function icon(path: ReactNode) {
 }
 
 export const Icon = {
+  user: icon(
+    <>
+      <circle cx="8" cy="5.25" r="2.5" />
+      <path d="M3 13.5v-1.25a5 5 0 0 1 10 0v1.25z" />
+    </>,
+  ),
   copy: icon(
     <>
       <rect x="5.5" y="5.5" width="8" height="8" rx="1.75" />

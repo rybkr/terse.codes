@@ -7,6 +7,7 @@ export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, process.cwd(), ''), ...process.env };
   return {
     root: fileURLToPath(new URL('.', import.meta.url)),
+    envDir: process.cwd(),
     plugins: [react(), tailwindcss()],
     server: {
       host: '0.0.0.0',
