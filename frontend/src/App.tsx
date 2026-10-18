@@ -32,6 +32,10 @@ function AuthCard({ children }: { children: ReactNode }) {
       <div className="relative flex w-full flex-col items-center gap-5">
         <Link to="/" aria-label="Terse home"><LogoMark size={38} /></Link>
         {children}
+        <footer className="max-w-sm text-center text-[12px] leading-relaxed text-fg-muted">
+          <p>Terse is a competitive code golf game. Solve programming problems with friends using the fewest characters.</p>
+          <Link to="/privacy" className="mt-2 inline-block text-accent underline underline-offset-4 hover:text-fg">Privacy policy</Link>
+        </footer>
       </div>
     </main>
   );

@@ -382,6 +382,9 @@ export default function Landing({ userState }: { userState: UserState }) {
             </form>
           </div>
         </motion.main>
+        <footer className="relative mt-8 text-[12px] text-fg-subtle">
+          <Link to="/privacy" className="underline underline-offset-4 hover:text-fg">Privacy policy</Link>
+        </footer>
       </div>
     </MotionConfig>
   );

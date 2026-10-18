@@ -101,7 +101,7 @@ Shutdown stops accepting submissions and cancels queued jobs immediately. The ac
 
 Production setup is separate from local development. No Fly runtime validation is performed by the local test suite.
 
-1. Configure the Clerk production instance for Google/GitHub, required verified email, required immutable username of 4–12 characters, and password authentication. Supply production OAuth credentials and complete Clerk's DNS setup.
+1. Configure the Clerk production instance for Google/GitHub, required verified email, required immutable username of 4–12 characters, and password authentication. Supply production OAuth credentials and complete Clerk's DNS setup. Publish the public privacy page at `https://terse.codes/privacy` and use that URL in Google's Branding configuration. Keep its contact address and data practices current.
 2. Link the Convex CLI to the intended project and deploy the functions with `pnpm exec convex deploy`. Configure a random `TERSE_SERVER_SECRET` of at least 32 characters in the production Convex environment, and provide the identical value to Fly. The Convex functions accept only this server credential; browsers access application data through authenticated tRPC.
 3. Set Fly runtime secrets `CLERK_SECRET_KEY`, `CONVEX_URL`, `TERSE_SERVER_SECRET`, and `CLERK_WEBHOOK_SIGNING_SECRET`. Set `APP_ORIGIN` to the exact HTTPS application origin. Secrets must never use a `VITE_` prefix.
 4. Register Clerk's webhook at `https://YOUR_DOMAIN/webhooks/clerk` for `user.deleted`, `session.ended`, `session.revoked`, and `session.removed`; use its signing secret on Fly. Webhook signatures are verified, deleted accounts are tombstoned, and stale session events cannot revoke a newer session.
