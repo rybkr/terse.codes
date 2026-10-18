@@ -108,7 +108,7 @@ export default function PrivacyPage() {
               <h2 id="privacy-contact">Contact</h2>
               <p>
                 For privacy questions or requests about your account information, contact the Terse team
-                at <a href="mailto:voldyone72@gmail.com">voldyone72@gmail.com</a>.
+                at <a href="mailto:support@terse.codes">support@terse.codes</a>.
                 Please do not send passwords or submission source code in your request.
               </p>
             </section>
