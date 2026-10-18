@@ -1,18 +1,54 @@
-# See https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/
-
 name: Fly Deploy
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: Deploy app
     runs-on: ubuntu-latest
-    concurrency: deploy-group    # optional: ensure only one action runs at a time
+    concurrency:
+      group: fly-production
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --remote-only
+      - name: Configure and deploy production
+        shell: bash
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_WEBHOOK_SIGNING_SECRET: ${{ secrets.CLERK_WEBHOOK_SIGNING_SECRET }}
+          TERSE_SERVER_SECRET: ${{ secrets.TERSE_SERVER_SECRET }}
+          APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+          CONVEX_URL: ${{ vars.CONVEX_URL }}
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+
+          for name in FLY_API_TOKEN CLERK_SECRET_KEY CLERK_WEBHOOK_SIGNING_SECRET TERSE_SERVER_SECRET APP_ORIGIN CONVEX_URL VITE_CLERK_PUBLISHABLE_KEY; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing production setting: $name"
+              exit 1
+            fi
+            if [[ "${!name}" == *$'\n'* || "${!name}" == *$'\r'* ]]; then
+              echo "::error::Production setting contains a line break: $name"
+              exit 1
+            fi
+          done
+
+          printf '%s\n' \
+            "CLERK_SECRET_KEY=$CLERK_SECRET_KEY" \
+            "CLERK_WEBHOOK_SIGNING_SECRET=$CLERK_WEBHOOK_SIGNING_SECRET" \
+            "TERSE_SERVER_SECRET=$TERSE_SERVER_SECRET" \
+            "APP_ORIGIN=$APP_ORIGIN" \
+            "CONVEX_URL=$CONVEX_URL" \
+            | flyctl secrets import --stage
+
+          flyctl deploy --remote-only --ha=false \
+            --build-arg "VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY"
