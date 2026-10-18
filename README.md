@@ -6,7 +6,7 @@ Use **Copy join link** in the lobby to share `https://terse.codes/join/<room-cod
 
 ## Run locally
 
-Install Node.js 24 or newer, pnpm, and Python 3.9 or newer, then run:
+Install Node.js 24 or newer, pnpm, and Python 3.9 or newer. Create `.env.local` from `.env.example` and supply Clerk development keys, then run:
 
 ```sh
 pnpm install
@@ -16,7 +16,7 @@ pnpm setup:dev
 pnpm dev
 ```
 
-Create `.env` from `.env.example` and supply Clerk development keys before starting. `pnpm setup:dev` configures Convex and a shared server secret without displaying it. The Convex CLI can use a local development deployment or a linked cloud project. `.env.local` overrides `.env`; both are gitignored.
+`pnpm setup:dev` configures Convex and a shared server secret without displaying it. The Convex CLI can use a local development deployment or a linked cloud project. Local development, builds, startup, and browser tests use only `.env.local`; `.env` and mode-specific environment files are ignored. Explicit shell environment variables take precedence. `.env.local` is gitignored.
 
 Open http://localhost:3000. Vite proxies tRPC requests to port 8000. `pnpm dev` runs the frontend, API, and Convex development watcher. Use `APP_ORIGIN` if accessing the frontend through a different host or forwarded URL.
 
@@ -26,6 +26,8 @@ For the production build:
 pnpm build
 pnpm start
 ```
+
+These commands test the built application locally with the services in `.env.local`. Include `http://localhost:8000` in `APP_ORIGIN` when testing the built app at that address. Fly receives production settings from GitHub Actions through build arguments and runtime secrets; it does not read an `.env` file. The Docker build excludes local environment files. For an explicit production Convex deploy, keep its deploy key in a separate ignored file and pass it with `convex deploy --env-file .env.deploy.local`.
 
 The TypeScript backend serves the React build and tRPC from http://localhost:8000. Python is used only to execute submissions. The Dockerfile includes both runtimes. The Fly configuration allocates 1 GB for large suites and submission workers. The production image caps the Node old-generation heap at 256 MiB and each young-generation semi-space at 8 MiB, leaving room for the single Python worker, whose address-space limit scales up to 512 MiB. `/health` returns the server's health status.
 
