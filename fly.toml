@@ -20,6 +20,7 @@ kill_timeout = '30s'
 [[vm]]
   memory = '1gb'
   cpus = 1
+  cpu_kind = 'shared'
 
 [[http_service.checks]]
   grace_period = "15s"
